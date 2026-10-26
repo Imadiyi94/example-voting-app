@@ -1,0 +1,122 @@
+{{- /*
+Stateless services (vote, redis, worker, result).
+
+One Deployment per entry in .Values.services, fully driven by values.yaml:
+image, replicas, ports, env, rollout probes, resources and security contexts.
+*/ -}}
+{{- $root := . -}}
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "voting-app.labels" $root | nindent 4 }}
+    app: {{ $name }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  replicas: {{ $svc.replicaCount }}
+  revisionHistoryLimit: {{ $svc.revisionHistoryLimit | default 3 }}
+  {{- if hasKey $svc "minReadySeconds" }}
+  minReadySeconds: {{ $svc.minReadySeconds }}
+  {{- end }}
+  {{- with $svc.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/instance: {{ $root.Release.Name }}
+      {{- if or (and $svc.metrics $svc.metrics.enabled) $root.Values.rolloutToken }}
+      annotations:
+        {{- if and $svc.metrics $svc.metrics.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $svc.containerPort | quote }}
+        prometheus.io/path: {{ $svc.metrics.path | quote }}
+        {{- end }}
+        {{- with $root.Values.rolloutToken }}
+        voting-app/rollout-token: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $root.Values.serviceAccount.name }}
+      {{- with $root.Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "voting-app.securityContext" (dict "global" $root.Values.podSecurityContext "override" $svc.podSecurityContext) | trim | nindent 8 }}
+      {{- with $svc.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $svc.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $svc.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "voting-app.image" (dict "root" $root "image" $svc.image) | quote }}
+          imagePullPolicy: {{ $svc.image.pullPolicy | default $root.Values.images.pullPolicy }}
+          {{- with $svc.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $svc.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if $svc.containerPort }}
+          ports:
+            - name: {{ $svc.portName }}
+              containerPort: {{ $svc.containerPort }}
+              protocol: TCP
+          {{- end }}
+          {{- with $svc.env }}
+          env:
+            {{- include "voting-app.env" (dict "root" $root "env" .) | trim | nindent 12 }}
+          {{- end }}
+          {{- with $svc.probes }}
+          {{- with .startup }}
+          startupProbe:
+            {{- include "voting-app.probe" . | trim | nindent 12 }}
+          {{- end }}
+          {{- with .readiness }}
+          readinessProbe:
+            {{- include "voting-app.probe" . | trim | nindent 12 }}
+          {{- end }}
+          {{- with .liveness }}
+          livenessProbe:
+            {{- include "voting-app.probe" . | trim | nindent 12 }}
+          {{- end }}
+          {{- end }}
+          securityContext:
+            {{- include "voting-app.securityContext" (dict "global" $root.Values.containerSecurityContext "override" $svc.containerSecurityContext) | trim | nindent 12 }}
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          {{- if and $svc.persistence $svc.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ $svc.persistence.mountPath }}
+          {{- end }}
+      {{- if and $svc.persistence $svc.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-data" $name }}
+      {{- end }}
+{{- end }}
+{{- end }}

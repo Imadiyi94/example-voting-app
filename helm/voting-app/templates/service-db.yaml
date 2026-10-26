@@ -1,0 +1,27 @@
+{{- if .Values.database.enabled }}
+{{- if .Values.database.service.enabled }}
+{{- $db := .Values.database }}
+{{- /*
+Governing Service for the PostgreSQL StatefulSet. Its name must match
+database.name (and config.dbHost) so pods can resolve "db" directly.
+*/ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $db.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "voting-app.labels" . | nindent 4 }}
+    app: {{ $db.name }}
+    app.kubernetes.io/name: {{ $db.name }}
+spec:
+  type: {{ $db.service.type | default "ClusterIP" }}
+  selector:
+    app: {{ $db.name }}
+  ports:
+    - name: {{ $db.service.portName }}
+      port: {{ $db.service.port }}
+      targetPort: {{ $db.service.targetPort }}
+      protocol: TCP
+{{- end }}
+{{- end }}

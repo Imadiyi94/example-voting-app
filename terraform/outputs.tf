@@ -16,9 +16,9 @@ output "grafana_endpoint" {
   value       = "http://localhost:30300 (admin/admin)"
 }
 
-output "image_tag" {
-  description = "Docker image tag used for deployment"
-  value       = var.image_tag
+output "helm_release" {
+  description = "Helm release that owns the application workloads (deployed by deploy-local.sh)"
+  value       = "voting-app"
 }
 
 output "services_summary" {

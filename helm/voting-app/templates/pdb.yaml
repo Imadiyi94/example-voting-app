@@ -1,0 +1,27 @@
+{{- /*
+PodDisruptionBudget for multi-replica stateless services.
+
+With minAvailable: 1 and two replicas, a node drain can evict at most one pod
+at a time, keeping the service answerable during cluster maintenance.
+*/ -}}
+{{- if .Values.podDisruptionBudget.enabled }}
+{{- $root := . -}}
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled (gt (int $svc.replicaCount) 1) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "voting-app.labels" $root | nindent 4 }}
+    app: {{ $name }}
+spec:
+  minAvailable: {{ $root.Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+{{- end }}
+{{- end }}
+{{- end }}

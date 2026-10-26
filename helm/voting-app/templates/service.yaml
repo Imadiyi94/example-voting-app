@@ -1,0 +1,34 @@
+{{- /*
+One Service per stateless entry in .Values.services.
+Service DNS names intentionally match the keys (vote, redis, worker, result)
+because config.redisHost / config.dbHost point at them.
+*/ -}}
+{{- $root := . -}}
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled $svc.service.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "voting-app.labels" $root | nindent 4 }}
+    app: {{ $name }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  type: {{ $svc.service.type | default "ClusterIP" }}
+  {{- if $svc.service.headless }}
+  clusterIP: None
+  {{- end }}
+  selector:
+    app: {{ $name }}
+  {{- if not $svc.service.headless }}
+  ports:
+    - name: {{ $svc.service.portName }}
+      port: {{ $svc.service.port }}
+      targetPort: {{ $svc.service.targetPort }}
+      protocol: TCP
+  {{- end }}
+{{- end }}
+{{- end }}

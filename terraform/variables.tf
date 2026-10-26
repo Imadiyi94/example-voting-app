@@ -20,83 +20,9 @@ variable "namespace" {
   default     = "voting-app"
 }
 
-variable "image_tag" {
-  description = "Docker image tag for all services"
-  type        = string
-  default     = "local"
-}
-
-variable "image_registry" {
-  description = "Docker registry (empty for local images)"
-  type        = string
-  default     = ""
-}
-
-variable "replica_counts" {
-  description = "Replica counts for each service (dev-sized)"
-  type = object({
-    vote   = number
-    redis  = number
-    worker = number
-    db     = number
-    result = number
-  })
-  default = {
-    vote   = 1
-    redis  = 1
-    worker = 1
-    db     = 1
-    result = 1
-  }
-}
-
-variable "resource_limits" {
-  description = "Resource limits for each service (dev-sized)"
-  type = object({
-    vote = object({
-      cpu    = string
-      memory = string
-    })
-    redis = object({
-      cpu    = string
-      memory = string
-    })
-    worker = object({
-      cpu    = string
-      memory = string
-    })
-    db = object({
-      cpu    = string
-      memory = string
-    })
-    result = object({
-      cpu    = string
-      memory = string
-    })
-  })
-  default = {
-    vote = {
-      cpu    = "500m"
-      memory = "256Mi"
-    }
-    redis = {
-      cpu    = "250m"
-      memory = "256Mi"
-    }
-    worker = {
-      cpu    = "500m"
-      memory = "512Mi"
-    }
-    db = {
-      cpu    = "500m"
-      memory = "512Mi"
-    }
-    result = {
-      cpu    = "500m"
-      memory = "256Mi"
-    }
-  }
-}
+# Image tags, replica counts and resource limits are no longer Terraform
+# inputs: they live in helm/voting-app/values.yaml (single control surface) and
+# are overridden per environment with --set/--values at helm upgrade time.
 
 variable "db_password" {
   description = "PostgreSQL password. Supply via terraform.tfvars (git-ignored) or TF_VAR_db_password; never commit it."

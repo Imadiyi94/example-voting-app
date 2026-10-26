@@ -1,0 +1,15 @@
+{{- /*
+Runtime (non-secret) configuration. Consumed through configMapKeyRef, so the
+same image can be promoted across environments with different values files.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "voting-app.configMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "voting-app.labels" . | nindent 4 }}
+data:
+  {{- range $key, $value := .Values.config }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
