@@ -1,0 +1,76 @@
+# =========================================================================
+# Capstone 1 - The Voting App
+# Repository ignore rules
+# Deliverable requirement: no configuration secrets in version control.
+# =========================================================================
+
+# --- Secrets (NEVER commit) ---
+secrets/db_password.txt
+secrets/*.txt
+!secrets/db_password.example.txt
+.env
+.env.*
+*.secret
+*.pem
+*.key
+!*.pub
+*.p12
+*.pfx
+aws-credentials
+docker-config.json
+
+# --- Terraform ---
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/tfplan
+terraform/*.tfplan
+terraform/plan.out
+terraform/terraform.tfvars
+terraform/*.auto.tfvars
+crash.log
+
+# --- Kubernetes credentials ---
+terraform/kubeconfig-*
+kubeconfig
+*.kubeconfig
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# --- Node.js ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+
+# --- .NET ---
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
+
+# --- Scan / test artifacts ---
+trivy-*.sarif
+trivy-*.json
+test-results/

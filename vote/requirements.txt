@@ -1,0 +1,6 @@
+# Capstone 1 - Vote Service Dependencies
+# Pinned versions for reproducibility and security (Phase 2 - Vulnerability Mitigation)
+
+flask==3.1.0
+gunicorn==23.0.0
+redis==5.2.0

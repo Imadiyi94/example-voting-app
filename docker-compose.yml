@@ -1,0 +1,225 @@
+# Capstone 1 - The Voting App
+# Local development stack with bridge networking and persistent storage
+# Images pinned by SHA256 digest for reproducibility and security (Phase 2)
+
+networks:
+  voting-net:
+    driver: bridge
+    name: voting-net
+    internal: false  # Allow outbound internet for health checks / package installs if needed
+
+volumes:
+  db-data:
+    name: voting-app-db-data
+    driver: local
+  redis-data:
+    name: voting-app-redis-data
+    driver: local
+
+services:
+  # Vote Service - Python Flask web interface
+  # Accepts incoming votes and pushes to Redis queue
+  vote:
+    build:
+      context: ./vote
+      dockerfile: Dockerfile
+    image: voting-app-vote:local
+    container_name: voting-app-vote
+    hostname: vote
+    networks:
+      - voting-net
+    ports:
+      - "5000:8080"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # Redis Service - In-memory queue for votes
+  # High-speed temporary cache layer
+  redis:
+    image: redis:7-alpine@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
+    container_name: voting-app-redis
+    hostname: redis
+    networks:
+      - voting-net
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.05'
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    # Redis on Alpine uses setpriv which needs capabilities; skip cap_drop for base image
+    # Custom-built services (vote, worker, result) run as non-root with cap_drop
+
+  # Worker Service - .NET Core background processor
+  # Polls Redis, processes votes, writes to PostgreSQL
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    image: voting-app-worker:local
+    container_name: voting-app-worker
+    hostname: worker
+    networks:
+      - voting-net
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD_FILE=/run/secrets/db_password
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z db 5432 && nc -z redis 6379"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    secrets:
+      - db_password
+
+  # Database Service - PostgreSQL persistent storage
+  # Stores voting tallies with hardened volume persistence
+  db:
+    image: postgres:16-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36
+    container_name: voting-app-db
+    hostname: db
+    networks:
+      - voting-net
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    # PostgreSQL entrypoint switches users; needs capabilities
+    # Custom-built services (vote, worker, result) run as non-root with cap_drop
+    secrets:
+      - db_password
+
+  # Result Service - Node.js web interface
+  # Reads from PostgreSQL, pushes real-time updates via SSE
+  result:
+    build:
+      context: ./result
+      dockerfile: Dockerfile
+    image: voting-app-result:local
+    container_name: voting-app-result
+    hostname: result
+    networks:
+      - voting-net
+    ports:
+      - "5001:8080"
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD_FILE=/run/secrets/db_password
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    secrets:
+      - db_password
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt

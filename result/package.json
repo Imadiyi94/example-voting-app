@@ -1,0 +1,18 @@
+{
+  "name": "voting-app-result",
+  "version": "1.0.0",
+  "description": "Capstone 1 - The Voting App Result Service",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "pg": "^8.11.3",
+    "socket.io": "^4.7.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

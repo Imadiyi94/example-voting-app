@@ -1,0 +1,73 @@
+# Capstone 1 - The Voting App
+# Kind Cluster Configuration for Local Cloud Emulation (Windows-compatible)
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: voting-app
+
+# Use the default CNI (kindnet) which works better on Windows
+networking:
+  # Pin the API server port so the generated kubeconfig is stable across recreations
+  apiServerAddress: "127.0.0.1"
+  apiServerPort: 6443
+  disableDefaultCNI: false
+  kubeProxyMode: "iptables"
+
+# Simple 3-node cluster
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.29.2@sha256:51a1434a5397193442f0be2a297b488b6c919ce8a3931be0ce822606ea5ca245
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 30080
+        protocol: TCP
+      - containerPort: 30443
+        hostPort: 30443
+        protocol: TCP
+      - containerPort: 30090
+        hostPort: 30090
+        protocol: TCP
+      - containerPort: 30300
+        hostPort: 30300
+        protocol: TCP
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            cgroup-driver: "systemd"
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            v: "2"
+        controllerManager:
+          extraArgs:
+            bind-address: "0.0.0.0"
+        scheduler:
+          extraArgs:
+            bind-address: "0.0.0.0"
+
+  - role: worker
+    image: kindest/node:v1.29.2@sha256:51a1434a5397193442f0be2a297b488b6c919ce8a3931be0ce822606ea5ca245
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            cgroup-driver: "systemd"
+
+  - role: worker
+    image: kindest/node:v1.29.2@sha256:51a1434a5397193442f0be2a297b488b6c919ce8a3931be0ce822606ea5ca245
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            cgroup-driver: "systemd"
+
+# Ensure containerd uses the local Docker registry
+containerdConfigPatches:
+  - |
+    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5000"]
+      endpoint = ["http://localhost:5000"]
