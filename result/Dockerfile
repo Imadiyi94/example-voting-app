@@ -28,6 +28,15 @@ RUN apk add --no-cache \
     postgresql-client \
     && rm -rf /var/cache/apk/*
 
+# Remove the bundled npm/corepack CLIs: the service only runs `node server.js`,
+# and npm ships its own copy of node-tar (CVE-2026-59873), which a production
+# runtime image does not need. This keeps the Trivy CRITICAL gate clean.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/npm \
+           /usr/local/bin/npx \
+           /usr/local/bin/corepack
+
 # Use existing 'node' user (UID 1000, GID 1000) from base image
 WORKDIR /app
 
