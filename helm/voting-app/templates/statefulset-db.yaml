@@ -1,0 +1,119 @@
+{{- /*
+PostgreSQL StatefulSet.
+
+Uses volumeClaimTemplates so each replica gets its own dedicated persistent
+volume (stateful database durability), plus an optional ConfigMap carrying the
+bootstrap SQL. Every knob comes from .Values.database.
+*/ -}}
+{{- if .Values.database.enabled }}
+{{- $root := . -}}
+{{- $db := .Values.database }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $db.name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "voting-app.labels" $root | nindent 4 }}
+    app: {{ $db.name }}
+    app.kubernetes.io/name: {{ $db.name }}
+spec:
+  serviceName: {{ $db.name }}
+  replicas: {{ $db.replicaCount }}
+  revisionHistoryLimit: {{ $db.revisionHistoryLimit | default 3 }}
+  selector:
+    matchLabels:
+      app: {{ $db.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $db.name }}
+        app.kubernetes.io/name: {{ $db.name }}
+        app.kubernetes.io/instance: {{ $root.Release.Name }}
+      {{- if and $db.metrics $db.metrics.enabled }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $db.containerPort | quote }}
+        prometheus.io/path: {{ $db.metrics.path | quote }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $root.Values.serviceAccount.name }}
+      {{- with $root.Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "voting-app.securityContext" (dict "global" $root.Values.podSecurityContext "override" $db.podSecurityContext) | trim | nindent 8 }}
+      {{- with $db.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $db.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $db.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $db.name }}
+          image: {{ include "voting-app.image" (dict "root" $root "image" $db.image) | quote }}
+          imagePullPolicy: {{ $db.image.pullPolicy | default $root.Values.images.pullPolicy }}
+          ports:
+            - name: {{ $db.portName }}
+              containerPort: {{ $db.containerPort }}
+              protocol: TCP
+          env:
+            {{- include "voting-app.env" (dict "root" $root "env" $db.env) | trim | nindent 12 }}
+          {{- with $db.probes }}
+          {{- with .startup }}
+          startupProbe:
+            {{- include "voting-app.probe" . | trim | nindent 12 }}
+          {{- end }}
+          {{- with .readiness }}
+          readinessProbe:
+            {{- include "voting-app.probe" . | trim | nindent 12 }}
+          {{- end }}
+          {{- with .liveness }}
+          livenessProbe:
+            {{- include "voting-app.probe" . | trim | nindent 12 }}
+          {{- end }}
+          {{- end }}
+          securityContext:
+            {{- include "voting-app.securityContext" (dict "global" $root.Values.containerSecurityContext "override" $db.containerSecurityContext) | trim | nindent 12 }}
+          resources:
+            {{- toYaml $db.resources | nindent 12 }}
+          volumeMounts:
+            {{- if $db.persistence.enabled }}
+            - name: data
+              mountPath: {{ $db.persistence.mountPath }}
+            {{- end }}
+            {{- if $db.initScript.enabled }}
+            - name: init-script
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+            {{- end }}
+      {{- if $db.initScript.enabled }}
+      volumes:
+        - name: init-script
+          configMap:
+            name: {{ include "voting-app.dbInitConfigMapName" $root }}
+      {{- end }}
+  {{- if $db.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app: {{ $db.name }}
+      spec:
+        accessModes:
+          - {{ $db.persistence.accessMode | default "ReadWriteOnce" }}
+        {{- with $db.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $db.persistence.size }}
+  {{- end }}
+{{- end }}

@@ -27,7 +27,11 @@ resource "kubernetes_resource_quota" "app" {
     hard = {
       "requests.cpu"    = "2000m"
       "requests.memory" = "4Gi"
-      "limits.cpu"      = "4000m"
+      # 6000m leaves room for rolling-update surge pods. The steady state uses
+      # 3500m of container CPU limits (7 pods at the 500m LimitRange default),
+      # so a 4000m ceiling would reject the two extra surge pods that vote and
+      # result need for maxUnavailable: 0 rollouts.
+      "limits.cpu"      = "6000m"
       "limits.memory"   = "8Gi"
       "pods"            = "20"
       "services"        = "10"

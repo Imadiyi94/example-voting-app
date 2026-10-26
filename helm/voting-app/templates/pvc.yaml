@@ -1,0 +1,28 @@
+{{- /*
+Persistent volume claims for stateless services that need durable data.
+Today that is Redis (append-only file). The claim name matches the volume
+referenced by deployment.yaml: <service>-data.
+*/ -}}
+{{- $root := . -}}
+{{- range $name, $svc := .Values.services }}
+{{- if and $svc.enabled $svc.persistence $svc.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-data" $name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "voting-app.labels" $root | nindent 4 }}
+    app: {{ $name }}
+spec:
+  accessModes:
+    - {{ $svc.persistence.accessMode | default "ReadWriteOnce" }}
+  {{- with $svc.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $svc.persistence.size }}
+{{- end }}
+{{- end }}

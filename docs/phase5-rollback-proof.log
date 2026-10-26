@@ -1,0 +1,660 @@
+
+===============================================================================
+PHASE 5 - ROLLBACK ASSURANCE EVIDENCE
+===============================================================================
+Generated : 2026-10-26T13:06:18Z
+Release   : voting-app (namespace voting-app)
+Chart     : helm/voting-app
+Cluster   : kind-voting-app
+Helm      : v4.3.1+gc0d08d0
+
+Failure injection parameters:
+  probe drill : services.vote.probes.readiness.httpGet.path=/does-not-exist
+  image drill : images.tag=broken-tag-does-not-exist
+Failure timeout : 90s
+Recovery timeout: 5m
+
+--- Baseline workload state
+NAME                      READY   STATUS    WAITING   RESTARTS
+db-0                      true    Running   <none>    0
+redis-84b98fb57f-wz2t4    true    Running   <none>    0
+result-765dbbbc85-bgdpp   true    Running   <none>    1
+result-765dbbbc85-khfgm   true    Running   <none>    1
+vote-5f4f9fc5fd-gttwj     true    Running   <none>    4
+vote-5f4f9fc5fd-jbdrp     true    Running   <none>    4
+worker-7775dd69cb-vg2xj   true    Running   <none>    6
+
+--- Baseline public interface
+vote.local   -> HTTP 200
+result.local -> HTTP 200
+
+--- Baseline release revision: 7
+REVISION	UPDATED                 	STATUS    	CHART           	APP VERSION	DESCRIPTION                                                                                                            
+1       	Mon Oct 26 13:28:34 2026	superseded	voting-app-1.0.0	1.0.0      	Install complete                                                                                                       
+2       	Mon Oct 26 13:38:33 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/result not ready. status: InProgress, message: Updated: ...
+3       	Mon Oct 26 13:40:36 2026	superseded	voting-app-1.0.0	1.0.0      	Rollback to 1                                                                                                          
+4       	Mon Oct 26 13:40:40 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/result not ready. status: InProgress, message: Updated: ...
+5       	Mon Oct 26 14:00:29 2026	superseded	voting-app-1.0.0	1.0.0      	Rollback to 3                                                                                                          
+6       	Mon Oct 26 14:03:35 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/vote not ready. status: InProgress, message: Updated: 1/...
+7       	Mon Oct 26 14:04:58 2026	deployed  	voting-app-1.0.0	1.0.0      	Rollback to 5                                                                                                          
+
+--- Baseline release values (single control surface in effect)
+COMPUTED VALUES:
+commonLabels: {}
+config:
+  dbHost: db
+  dbName: postgres
+  dbPort: "5432"
+  dbUser: postgres
+  redisHost: redis
+  redisPort: "6379"
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+database:
+  affinity: {}
+  containerPort: 5432
+  containerSecurityContext:
+    runAsGroup: 70
+    runAsUser: 70
+  enabled: true
+  env:
+  - name: PGDATA
+    value: /var/lib/postgresql/data/pgdata
+  - configMapKey: dbName
+    name: POSTGRES_DB
+  - configMapKey: dbUser
+    name: POSTGRES_USER
+  - name: POSTGRES_PASSWORD
+    secretKey: db_password
+  image:
+    digest: sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36
+    repository: postgres
+    tag: 16-alpine
+  initScript:
+    enabled: true
+  metrics:
+    enabled: false
+  name: db
+  nodeSelector: {}
+  persistence:
+    accessMode: ReadWriteOnce
+    enabled: true
+    mountPath: /var/lib/postgresql/data
+    size: 5Gi
+    storageClass: standard
+  pgData: /var/lib/postgresql/data/pgdata
+  podSecurityContext:
+    fsGroup: 70
+    runAsGroup: 70
+    runAsUser: 70
+  portName: postgres
+  probes:
+    liveness:
+      exec:
+        command:
+        - pg_isready
+        - -U
+        - postgres
+        - -d
+        - postgres
+      failureThreshold: 5
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+    readiness:
+      exec:
+        command:
+        - pg_isready
+        - -U
+        - postgres
+        - -d
+        - postgres
+      failureThreshold: 3
+      periodSeconds: 5
+      timeoutSeconds: 3
+    startup:
+      exec:
+        command:
+        - pg_isready
+        - -U
+        - postgres
+        - -d
+        - postgres
+      failureThreshold: 60
+      periodSeconds: 5
+      timeoutSeconds: 5
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  revisionHistoryLimit: 3
+  service:
+    enabled: true
+    port: 5432
+    portName: postgres
+    targetPort: 5432
+    type: ClusterIP
+  tolerations: []
+images:
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+  registry: ""
+  tag: local
+ingress:
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  className: nginx
+  enabled: true
+  hosts:
+  - host: vote.local
+    path: /
+    pathType: Prefix
+    portName: http
+    service: vote
+  - host: result.local
+    path: /
+    pathType: Prefix
+    portName: http
+    service: result
+  tls: []
+nameOverride: ""
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+  selectorLabel: app
+podSecurityContext:
+  fsGroup: 1000
+  runAsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
+rolloutToken: ""
+secrets:
+  existingSecret: voting-app-secrets
+  passwordKey: db_password
+serviceAccount:
+  create: false
+  name: voting-app
+services:
+  redis:
+    affinity: {}
+    command:
+    - redis-server
+    - --appendonly
+    - "yes"
+    - --maxmemory
+    - 256mb
+    - --maxmemory-policy
+    - allkeys-lru
+    containerPort: 6379
+    enabled: true
+    env: []
+    image:
+      digest: sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
+      repository: redis
+      tag: 7-alpine
+    metrics:
+      enabled: false
+    minReadySeconds: 0
+    nodeSelector: {}
+    persistence:
+      accessMode: ReadWriteOnce
+      enabled: true
+      mountPath: /data
+      size: 1Gi
+      storageClass: standard
+    podSecurityContext:
+      fsGroup: 999
+      runAsGroup: 999
+      runAsUser: 999
+    portName: redis
+    probes:
+      liveness:
+        exec:
+          command:
+          - redis-cli
+          - ping
+        failureThreshold: 5
+        initialDelaySeconds: 15
+        periodSeconds: 10
+        timeoutSeconds: 3
+      readiness:
+        exec:
+          command:
+          - redis-cli
+          - ping
+        failureThreshold: 3
+        periodSeconds: 5
+        timeoutSeconds: 3
+      startup:
+        exec:
+          command:
+          - redis-cli
+          - ping
+        failureThreshold: 30
+        periodSeconds: 5
+        timeoutSeconds: 3
+    replicaCount: 1
+    resources:
+      limits:
+        cpu: 250m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    revisionHistoryLimit: 3
+    service:
+      enabled: true
+      port: 6379
+      portName: redis
+      targetPort: 6379
+      type: ClusterIP
+    strategy:
+      type: Recreate
+    tolerations: []
+  result:
+    affinity: {}
+    containerPort: 8080
+    enabled: true
+    env:
+    - configMapKey: dbHost
+      name: DB_HOST
+    - configMapKey: dbPort
+      name: DB_PORT
+    - configMapKey: dbName
+      name: DB_NAME
+    - configMapKey: dbUser
+      name: DB_USER
+    - name: DB_PASSWORD
+      secretKey: db_password
+    image:
+      repository: voting-app-result
+      tag: ""
+    metrics:
+      enabled: true
+      path: /health
+    minReadySeconds: 5
+    nodeSelector: {}
+    podSecurityContext:
+      fsGroup: 1000
+      runAsGroup: 1000
+      runAsUser: 1000
+    portName: http
+    probes:
+      liveness:
+        failureThreshold: 5
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 10
+        periodSeconds: 10
+        timeoutSeconds: 5
+      readiness:
+        failureThreshold: 3
+        httpGet:
+          path: /health
+          port: http
+        periodSeconds: 5
+        timeoutSeconds: 3
+      startup:
+        failureThreshold: 40
+        httpGet:
+          path: /health
+          port: http
+        periodSeconds: 5
+        timeoutSeconds: 5
+    replicaCount: 2
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 64Mi
+    revisionHistoryLimit: 5
+    service:
+      enabled: true
+      port: 80
+      portName: http
+      targetPort: 8080
+      type: ClusterIP
+    strategy:
+      rollingUpdate:
+        maxSurge: 1
+        maxUnavailable: 0
+      type: RollingUpdate
+    tolerations: []
+  vote:
+    affinity: {}
+    containerPort: 8080
+    enabled: true
+    env:
+    - configMapKey: redisHost
+      name: REDIS_HOST
+    - configMapKey: redisPort
+      name: REDIS_PORT
+    image:
+      repository: voting-app-vote
+      tag: ""
+    metrics:
+      enabled: true
+      path: /health
+    minReadySeconds: 5
+    nodeSelector: {}
+    podSecurityContext:
+      fsGroup: 1000
+      runAsGroup: 1000
+      runAsUser: 1000
+    portName: http
+    probes:
+      liveness:
+        failureThreshold: 5
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 10
+        periodSeconds: 10
+        timeoutSeconds: 5
+      readiness:
+        failureThreshold: 3
+        httpGet:
+          path: /health
+          port: http
+        periodSeconds: 5
+        successThreshold: 1
+        timeoutSeconds: 3
+      startup:
+        failureThreshold: 40
+        httpGet:
+          path: /health
+          port: http
+        periodSeconds: 5
+        timeoutSeconds: 5
+    replicaCount: 2
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 100m
+        memory: 64Mi
+    revisionHistoryLimit: 5
+    service:
+      enabled: true
+      port: 80
+      portName: http
+      targetPort: 8080
+      type: ClusterIP
+    strategy:
+      rollingUpdate:
+        maxSurge: 1
+        maxUnavailable: 0
+      type: RollingUpdate
+    tolerations: []
+  worker:
+    affinity: {}
+    enabled: true
+    env:
+    - configMapKey: redisHost
+      name: REDIS_HOST
+    - configMapKey: redisPort
+      name: REDIS_PORT
+    - configMapKey: dbHost
+      name: DB_HOST
+    - configMapKey: dbPort
+      name: DB_PORT
+    - configMapKey: dbName
+      name: DB_NAME
+    - configMapKey: dbUser
+      name: DB_USER
+    - name: DB_PASSWORD
+      secretKey: db_password
+    image:
+      repository: voting-app-worker
+      tag: ""
+    metrics:
+      enabled: false
+    minReadySeconds: 5
+    nodeSelector: {}
+    podSecurityContext:
+      fsGroup: 1000
+      runAsGroup: 1000
+      runAsUser: 1000
+    portName: ""
+    probes:
+      liveness:
+        exec:
+          command:
+          - sh
+          - -c
+          - nc -z "$DB_HOST" "$DB_PORT" && nc -z "$REDIS_HOST" "$REDIS_PORT"
+        failureThreshold: 5
+        initialDelaySeconds: 20
+        periodSeconds: 15
+        timeoutSeconds: 5
+      readiness:
+        exec:
+          command:
+          - sh
+          - -c
+          - nc -z "$DB_HOST" "$DB_PORT" && nc -z "$REDIS_HOST" "$REDIS_PORT"
+        failureThreshold: 3
+        periodSeconds: 10
+        timeoutSeconds: 3
+      startup:
+        exec:
+          command:
+          - sh
+          - -c
+          - nc -z "$DB_HOST" "$DB_PORT" && nc -z "$REDIS_HOST" "$REDIS_PORT"
+        failureThreshold: 60
+        periodSeconds: 5
+        timeoutSeconds: 3
+    replicaCount: 1
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    revisionHistoryLimit: 3
+    service:
+      enabled: true
+      headless: true
+    strategy:
+      rollingUpdate:
+        maxSurge: 1
+        maxUnavailable: 0
+      type: RollingUpdate
+    tolerations: []
+
+===============================================================================
+DRILL A - BROKEN ROLLOUT PROBE THEN MANUAL 'helm rollback'
+===============================================================================
+
+--- Injecting broken probe parameter: vote readiness path /does-not-exist
+
+--- helm upgrade (expected to fail: vote never becomes Ready)
+started  : 2026-10-26T13:06:20Z
+level=WARN msg="upgrade failed" name=voting-app error="resource Deployment/voting-app/vote not ready. status: InProgress, message: Updated: 1/2\ncontext deadline exceeded"
+Error: UPGRADE FAILED: resource Deployment/voting-app/vote not ready. status: InProgress, message: Updated: 1/2
+context deadline exceeded
+finished : 2026-10-26T13:07:52Z   (duration: 92s)
+[exit=1]
+
+--- Pod status after the failed rollout
+NAME                      READY   STATUS    WAITING   RESTARTS
+db-0                      true    Running   <none>    0
+redis-84b98fb57f-wz2t4    true    Running   <none>    0
+result-765dbbbc85-bgdpp   true    Running   <none>    1
+result-765dbbbc85-khfgm   true    Running   <none>    1
+vote-5f4f9fc5fd-gttwj     true    Running   <none>    4
+vote-5f4f9fc5fd-jbdrp     true    Running   <none>    4
+vote-6f9fdcb4f9-hw6wz     false   Running   <none>    0
+worker-7775dd69cb-vg2xj   true    Running   <none>    6
+
+--- Readiness gate observed by the kubelet
+7m29s       Warning   Unhealthy   pod/vote-5f4f9fc5fd-gttwj     Readiness probe failed: Get "http://10.244.2.3:8080/health": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+7m29s       Warning   Unhealthy   pod/vote-5f4f9fc5fd-jbdrp     Readiness probe failed: Get "http://10.244.1.4:8080/health": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+2m55s       Warning   Unhealthy   pod/vote-777c5d84dd-mbngq     Readiness probe failed: HTTP probe failed with statuscode: 404
+2m52s       Warning   Unhealthy   pod/vote-777c5d84dd-mbngq     Readiness probe failed: Get "http://10.244.1.9:8080/broken-readiness": dial tcp 10.244.1.9:8080: connect: connection refused
+81s         Warning   Unhealthy   pod/vote-6f9fdcb4f9-hw6wz     Startup probe failed: Get "http://10.244.1.10:8080/health": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+1s          Warning   Unhealthy   pod/vote-6f9fdcb4f9-hw6wz     Readiness probe failed: HTTP probe failed with statuscode: 404
+
+--- Deployment rollout state (new revision not available)
+NAME     READY   UP-TO-DATE   AVAILABLE   AGE   CONTAINERS   IMAGES                    SELECTOR
+vote     2/2     1            2           39m   vote         voting-app-vote:local     app=vote
+result   2/2     2            2           39m   result       voting-app-result:local   app=result
+worker   1/1     1            1           39m   worker       voting-app-worker:local   app=worker
+
+--- Availability during the failed rollout (old pods still serving)
+vote.local   -> HTTP 200
+result.local -> HTTP 200
+
+--- Release history shows the failed revision
+REVISION	UPDATED                 	STATUS    	CHART           	APP VERSION	DESCRIPTION                                                                                                            
+1       	Mon Oct 26 13:28:34 2026	superseded	voting-app-1.0.0	1.0.0      	Install complete                                                                                                       
+2       	Mon Oct 26 13:38:33 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/result not ready. status: InProgress, message: Updated: ...
+3       	Mon Oct 26 13:40:36 2026	superseded	voting-app-1.0.0	1.0.0      	Rollback to 1                                                                                                          
+4       	Mon Oct 26 13:40:40 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/result not ready. status: InProgress, message: Updated: ...
+5       	Mon Oct 26 14:00:29 2026	superseded	voting-app-1.0.0	1.0.0      	Rollback to 3                                                                                                          
+6       	Mon Oct 26 14:03:35 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/vote not ready. status: InProgress, message: Updated: 1/...
+7       	Mon Oct 26 14:04:58 2026	deployed  	voting-app-1.0.0	1.0.0      	Rollback to 5                                                                                                          
+8       	Mon Oct 26 14:06:20 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/vote not ready. status: InProgress, message: Updated: 1/...
+
+--- helm rollback to revision 7
+started  : 2026-10-26T13:07:54Z
+Rollback was a success! Happy Helming!
+finished : 2026-10-26T13:07:55Z   (duration: 1s)
+[exit=0]
+
+--- Workload state after rollback
+NAME                      READY   STATUS    WAITING   RESTARTS
+db-0                      true    Running   <none>    0
+redis-84b98fb57f-wz2t4    true    Running   <none>    0
+result-765dbbbc85-bgdpp   true    Running   <none>    1
+result-765dbbbc85-khfgm   true    Running   <none>    1
+vote-5f4f9fc5fd-gttwj     true    Running   <none>    4
+vote-5f4f9fc5fd-jbdrp     true    Running   <none>    4
+vote-6f9fdcb4f9-hw6wz     false   Running   <none>    0
+worker-7775dd69cb-vg2xj   true    Running   <none>    6
+
+--- Rollout confirmation
+deployment "vote" successfully rolled out
+deployment "result" successfully rolled out
+deployment "worker" successfully rolled out
+deployment "redis" successfully rolled out
+partitioned roll out complete: 1 new pods have been updated...
+
+--- Public interface after rollback
+vote.local   -> HTTP 200
+result.local -> HTTP 200
+
+--- History after rollback
+REVISION	UPDATED                 	STATUS    	CHART           	APP VERSION	DESCRIPTION                                                                                                            
+1       	Mon Oct 26 13:28:34 2026	superseded	voting-app-1.0.0	1.0.0      	Install complete                                                                                                       
+2       	Mon Oct 26 13:38:33 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/result not ready. status: InProgress, message: Updated: ...
+3       	Mon Oct 26 13:40:36 2026	superseded	voting-app-1.0.0	1.0.0      	Rollback to 1                                                                                                          
+4       	Mon Oct 26 13:40:40 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/result not ready. status: InProgress, message: Updated: ...
+5       	Mon Oct 26 14:00:29 2026	superseded	voting-app-1.0.0	1.0.0      	Rollback to 3                                                                                                          
+6       	Mon Oct 26 14:03:35 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/vote not ready. status: InProgress, message: Updated: 1/...
+7       	Mon Oct 26 14:04:58 2026	superseded	voting-app-1.0.0	1.0.0      	Rollback to 5                                                                                                          
+8       	Mon Oct 26 14:06:20 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/vote not ready. status: InProgress, message: Updated: 1/...
+9       	Mon Oct 26 14:07:54 2026	deployed  	voting-app-1.0.0	1.0.0      	Rollback to 7                                                                                                          
+
+===============================================================================
+DRILL B - BROKEN IMAGE TAG WITH AUTOMATIC '--rollback-on-failure'
+===============================================================================
+
+--- Injecting broken image parameter: images.tag=broken-tag-does-not-exist
+
+--- helm upgrade --rollback-on-failure (Helm restores the previous revision itself)
+started  : 2026-10-26T13:07:58Z
+level=WARN msg="upgrade failed" name=voting-app error="resource Deployment/voting-app/result not ready. status: InProgress, message: Updated: 1/2\nresource Deployment/voting-app/vote not ready. status: InProgress, message: Updated: 1/2\nresource Deployment/voting-app/worker not ready. status: InProgress, message: Pending termination: 1\ncontext deadline exceeded"
+Error: UPGRADE FAILED: release voting-app failed, and has been rolled back due to rollback-on-failure being set: resource Deployment/voting-app/result not ready. status: InProgress, message: Updated: 1/2
+resource Deployment/voting-app/vote not ready. status: InProgress, message: Updated: 1/2
+resource Deployment/voting-app/worker not ready. status: InProgress, message: Pending termination: 1
+context deadline exceeded
+finished : 2026-10-26T13:09:30Z   (duration: 92s)
+[exit=1]
+
+--- Image pull failure reported by the cluster
+db-0	 sha256:6a2e324ebe59af6031c4c1cd96c1d5072c2ebc36563d2196365e43b8297c062d
+redis-84b98fb57f-wz2t4	 sha256:4df5c34dc41256fc4ed293482cb34281e17d133077e9aa3c6a87fda60a356c65
+result-765dbbbc85-bgdpp	 docker.io/library/voting-app-result:local
+result-765dbbbc85-khfgm	 docker.io/library/voting-app-result:local
+result-bd6b8d86d-4gkqd	ImagePullBackOff voting-app-result:broken-tag-does-not-exist
+vote-5f4f9fc5fd-gttwj	 docker.io/library/voting-app-vote:local
+vote-5f4f9fc5fd-jbdrp	 docker.io/library/voting-app-vote:local
+vote-64f7c5c65f-9nghn	ContainerCreating voting-app-vote:broken-tag-does-not-exist
+worker-7775dd69cb-vg2xj	 docker.io/library/voting-app-worker:local
+
+--- Helm history after the automatic rollback
+REVISION	UPDATED                 	STATUS    	CHART           	APP VERSION	DESCRIPTION                                                                                                            
+2       	Mon Oct 26 13:38:33 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/result not ready. status: InProgress, message: Updated: ...
+3       	Mon Oct 26 13:40:36 2026	superseded	voting-app-1.0.0	1.0.0      	Rollback to 1                                                                                                          
+4       	Mon Oct 26 13:40:40 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/result not ready. status: InProgress, message: Updated: ...
+5       	Mon Oct 26 14:00:29 2026	superseded	voting-app-1.0.0	1.0.0      	Rollback to 3                                                                                                          
+6       	Mon Oct 26 14:03:35 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/vote not ready. status: InProgress, message: Updated: 1/...
+7       	Mon Oct 26 14:04:58 2026	superseded	voting-app-1.0.0	1.0.0      	Rollback to 5                                                                                                          
+8       	Mon Oct 26 14:06:20 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/vote not ready. status: InProgress, message: Updated: 1/...
+9       	Mon Oct 26 14:07:54 2026	superseded	voting-app-1.0.0	1.0.0      	Rollback to 7                                                                                                          
+10      	Mon Oct 26 14:07:58 2026	failed    	voting-app-1.0.0	1.0.0      	Upgrade "voting-app" failed: resource Deployment/voting-app/result not ready. status: InProgress, message: Updated: ...
+11      	Mon Oct 26 14:09:29 2026	deployed  	voting-app-1.0.0	1.0.0      	Rollback to 9                                                                                                          
+
+--- Workload state after automatic recovery
+NAME                      READY   STATUS    WAITING             RESTARTS
+db-0                      true    Running   <none>              0
+redis-84b98fb57f-wz2t4    true    Running   <none>              0
+result-765dbbbc85-bgdpp   true    Running   <none>              1
+result-765dbbbc85-khfgm   true    Running   <none>              1
+result-bd6b8d86d-4gkqd    false   Pending   ContainerCreating   0
+vote-5f4f9fc5fd-gttwj     true    Running   <none>              4
+vote-5f4f9fc5fd-jbdrp     true    Running   <none>              4
+worker-7775dd69cb-vg2xj   true    Running   <none>              6
+
+--- Rollout confirmation
+deployment "vote" successfully rolled out
+deployment "result" successfully rolled out
+deployment "worker" successfully rolled out
+deployment "redis" successfully rolled out
+partitioned roll out complete: 1 new pods have been updated...
+
+--- Public interface after automatic recovery
+vote.local   -> HTTP 200
+result.local -> HTTP 200
+
+===============================================================================
+RESULT
+===============================================================================
+Final release status:
+NAME: voting-app
+LAST DEPLOYED: Mon Oct 26 14:09:29 2026
+NAMESPACE: voting-app
+STATUS: deployed
+REVISION: 11
+DESCRIPTION: Rollback to 9
+
+Final pod state:
+NAME                      READY   STATUS    WAITING   RESTARTS
+db-0                      true    Running   <none>    0
+redis-84b98fb57f-wz2t4    true    Running   <none>    0
+result-765dbbbc85-bgdpp   true    Running   <none>    1
+result-765dbbbc85-khfgm   true    Running   <none>    1
+vote-5f4f9fc5fd-gttwj     true    Running   <none>    4
+vote-5f4f9fc5fd-jbdrp     true    Running   <none>    4
+worker-7775dd69cb-vg2xj   true    Running   <none>    6
+
+Final public interface:
+vote.local   -> HTTP 200
+result.local -> HTTP 200
