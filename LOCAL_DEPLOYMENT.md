@@ -1,29 +1,34 @@
 # Capstone 1 - The Voting App
 ## Local Cloud Emulation Deployment Guide
 
-This guide covers deploying the Voting App to a local Kind (Kubernetes in Docker) cluster using Terraform, replacing the AWS EKS deployment for local development.
+This guide covers deploying the Voting App to a local Kind (Kubernetes in Docker) cluster using Terraform for infrastructure and Helm for the application release, replacing the AWS EKS deployment for local development.
 
 ---
 
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Local Machine                                  │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │ Kind Cluster (voting-app)                                  │  │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │  │
-│  │  │ vote:1   │  │ redis:1  │  │ worker:1 │  │ db:1     │   │  │
-│  │  │ (5000)   │  │ (6379)   │  │          │  │ (5432)   │   │  │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │  │
-│  │  ┌──────────┐                                              │  │
-│  │  │ result:1 │                                              │  │
-│  │  │ (5001)   │                                              │  │
-│  │  └──────────┘                                              │  │
-│  └───────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  Access: http://localhost:5000 (vote) | http://localhost:5001 (result) │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    Local Machine                                         │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │ Kind Cluster (voting-app): 1 control-plane + 2 workers              │  │
+│  │                                                                   │  │
+│  │  Terraform: namespace, quota, limit range, network policies,      │  │
+│  │             Secret/RBAC, NGINX ingress controller                 │  │
+│  │                                                                   │  │
+│  │  Helm release "voting-app"                                        │  │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐          │  │
+│  │  │ vote x2  │  │ redis x1 │  │ worker   │  │ db (STS) │          │  │
+│  │  │ :8080    │  │ :6379    │  │          │  │ :5432    │          │  │
+│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘          │  │
+│  │  ┌──────────┐   Services, ConfigMaps, PVCs, Ingress rules         │  │
+│  │  │result x2 │   PDBs, startup/readiness/liveness probes           │  │
+│  │  │ :8080    │                                                     │  │
+│  │  └──────────┘                                                     │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
+│                                                                         │
+│  Access: http://vote.local:30080 | http://result.local:30080            │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -36,7 +41,11 @@ This guide covers deploying the Voting App to a local Kind (Kubernetes in Docker
 | Kind | 0.22+ | `go install sigs.k8s.io/kind@latest` |
 | Kubectl | 1.29+ | https://kubernetes.io/docs/tasks/tools/ |
 | Terraform | 1.6+ | https://terraform.io |
+| Helm | 3.13+ or 4.x | https://helm.sh/docs/intro/install/ |
 | Go | 1.21+ | https://go.dev |
+
+> The rollback drill uses `helm upgrade --rollback-on-failure`, which is Helm 4
+> syntax. On Helm 3 use `--atomic` instead.
 
 ---
 
@@ -47,14 +56,19 @@ This guide covers deploying the Voting App to a local Kind (Kubernetes in Docker
 cd example-voting-app
 
 # Make deploy script executable (Linux/macOS)
-chmod +x deploy-local.sh
+chmod +x deploy-local.sh scripts/rollback-drill.sh
 
-# Deploy everything (builds images, creates cluster, deploys app)
+# Deploy everything (builds images, creates cluster, applies infra, installs the chart)
 ./deploy-local.sh apply
 
 # Access the application
-# Vote:  http://localhost:5000
-# Result: http://localhost:5001
+# Vote:   http://vote.local:30080
+# Result: http://result.local:30080
+
+# Inspect the release and roll back if needed
+./deploy-local.sh status
+./deploy-local.sh history
+./deploy-local.sh rollback 3
 ```
 
 ---
@@ -96,31 +110,51 @@ kind load docker-image voting-app-worker:local --name voting-app
 kind load docker-image voting-app-result:local --name voting-app
 ```
 
-### 3. Apply All Application Resources (Terraform stage 2)
+### 3. Apply Infrastructure (Terraform stage 2)
 
 ```bash
 cd terraform
 terraform apply
 ```
 
-This provisions the namespace, quota, limit range, network policies, RBAC, secrets,
-all five workloads and their Services - entirely through Terraform modules.
+This provisions the namespace, quota, limit range, network policies, RBAC, the
+database Secret and the NGINX ingress controller. It no longer creates
+application workloads - those belong to the Helm release.
 
-### 4. Verify Deployment
+### 4. Install the Application Release (Helm)
 
 ```bash
-export KUBECONFIG="$PWD/kubeconfig-voting-app"
+cd ..
+
+helm upgrade --install voting-app helm/voting-app \
+  --namespace voting-app \
+  --kube-context kind-voting-app \
+  --set images.tag=local \
+  --wait --timeout 10m
+```
+
+Everything the application needs is rendered from `helm/voting-app/values.yaml`:
+five workloads, five Services, two ConfigMaps, two persistent volumes, the
+Ingress rules and two PodDisruptionBudgets.
+
+### 5. Verify Deployment
+
+```bash
+export KUBECONFIG="$PWD/terraform/kubeconfig-voting-app"
 
 kubectl get nodes
-kubectl get pods -n voting-app
-kubectl get svc -n voting-app
+helm status voting-app -n voting-app
+kubectl get pods,svc,pvc,ingress -n voting-app
 
-# Expose the services on the host
+# Ingress health checks
+curl -H "Host: vote.local"   http://localhost:30080/health
+curl -H "Host: result.local" http://localhost:30080/health
+
+# Or use port-forward for direct access
 kubectl -n voting-app port-forward svc/vote 5000:80 &
 kubectl -n voting-app port-forward svc/result 5001:80 &
 
 curl http://localhost:5000/health
-curl http://localhost:5001/health
 curl http://localhost:5001/api/votes
 ```
 
@@ -128,21 +162,66 @@ curl http://localhost:5001/api/votes
 
 ## Configuration Options
 
-Edit `terraform/variables.tf` or pass via CLI:
+Application settings are values, not Terraform variables. Override them per
+environment with `--set` or a values file:
 
 ```bash
-# Custom replica counts
-terraform apply -var='replica_counts={"vote":2,"redis":1,"worker":2,"db":1,"result":2}'
+# Scale a service
+helm upgrade voting-app helm/voting-app -n voting-app \
+  --reuse-values --set services.vote.replicaCount=3
 
-# Disable ingress
-terraform apply -var='enable_ingress=false'
+# Change an image tag (all services)
+helm upgrade voting-app helm/voting-app -n voting-app \
+  --reuse-values --set images.tag=v1.0.0
 
-# Disable monitoring
-terraform apply -var='enable_monitoring=false'
+# Point at a published registry
+helm upgrade voting-app helm/voting-app -n voting-app \
+  --reuse-values --set images.registry=ghcr.io/imadiyi94/example-voting-app
 
-# Custom image tag
-terraform apply -var='image_tag=v1.0.0'
+# Tune a probe (e.g. give vote longer to start)
+helm upgrade voting-app helm/voting-app -n voting-app \
+  --reuse-values --set services.vote.probes.startup.failureThreshold=60
+
+# Resize persistent storage (new PVCs only)
+helm upgrade voting-app helm/voting-app -n voting-app \
+  --reuse-values --set database.persistence.size=10Gi
 ```
+
+Terraform still owns infrastructure toggles:
+
+```bash
+terraform apply -var='enable_ingress=false'
+terraform apply -var='enable_monitoring=false'
+```
+
+See `docs/PHASE5.md` for the full values reference.
+
+---
+
+## Release Management and Rollback
+
+```bash
+# Current state
+helm status voting-app -n voting-app
+helm history voting-app -n voting-app
+
+# Roll back to the previous healthy revision
+helm rollback voting-app -n voting-app --wait
+
+# Roll back to a specific revision
+helm rollback voting-app 3 -n voting-app --wait
+
+# Upgrade with automatic rollback if the rollout fails (Helm 4)
+helm upgrade voting-app helm/voting-app -n voting-app \
+  --reuse-values --wait --rollback-on-failure
+# Helm 3 equivalent: --atomic
+
+# Prove the whole loop (broken probe + broken image, then recovery)
+./scripts/rollback-drill.sh
+```
+
+The drill appends timestamped evidence to `docs/phase5-rollback-proof.log` and
+leaves the release on a healthy revision.
 
 ---
 
@@ -163,21 +242,26 @@ terraform apply -var='image_tag=v1.0.0'
 
 ---
 
-## Terraform Module Structure
+## Project Structure
 
 ```
 terraform/
-├── main.tf                 # Root module
-├── root.tf                 # Module orchestration
-├── variables.tf            # Input variables
-├── outputs.tf              # Outputs
+├── main.tf                 # Root module (infrastructure only)
+├── variables.tf            # Input variables (incl. required db_password)
+├── outputs.tf              # Endpoints + helm_release name
 ├── kind-config.yaml        # Kind cluster config
-├── kind-cluster/           # Kind cluster management
-├── kubernetes-namespace/   # Namespace + quotas + network policies
-├── secrets/                # Secrets + ServiceAccount + RBAC
-├── voting-app/             # All 5 services (Deployments, Services, PVCs)
-├── ingress/                # NGINX Ingress + Ingress resources
-└── monitoring/             # Prometheus + Grafana + ServiceMonitors
+└── modules/
+    ├── kind-cluster/       # Kind cluster management
+    ├── kubernetes-namespace/   # Namespace + quota + limit range + network policies
+    ├── secrets/            # Secret + ServiceAccount + RBAC
+    ├── ingress/            # NGINX ingress controller (not the rules)
+    └── monitoring/         # Prometheus + Grafana (optional)
+
+helm/voting-app/
+├── Chart.yaml
+├── values.yaml             # single control surface for the whole app
+├── files/init.sql          # DB bootstrap
+└── templates/              # deployments, services, PVCs, probes, ingress, PDBs
 ```
 
 ---
@@ -201,15 +285,27 @@ terraform destroy -auto-approve
 kind get clusters
 kubectl get nodes
 
+# Helm release
+helm status voting-app -n voting-app
+helm history voting-app -n voting-app
+helm get values voting-app -n voting-app --all
+helm lint helm/voting-app
+helm template voting-app helm/voting-app --namespace voting-app
+
 # View pod logs
 kubectl logs -n voting-app -l app=vote
 kubectl logs -n voting-app -l app=worker
+
+# Watch a rollout
+kubectl rollout status deployment/vote -n voting-app
+kubectl rollout status statefulset/db -n voting-app
 
 # Port forward for direct access
 kubectl port-forward -n voting-app svc/vote 5000:80
 kubectl port-forward -n voting-app svc/result 5001:80
 
 # Clean up completely
+helm uninstall voting-app -n voting-app
 kind delete cluster --name voting-app
 terraform destroy -auto-approve
 ```
@@ -240,6 +336,32 @@ kind load docker-image voting-app-vote:local --name voting-app
 # Check node resources
 kubectl describe nodes
 kubectl describe pod <pod-name> -n voting-app
+
+# PVC binding (a Pending pod can be waiting for storage)
+kubectl get pvc -n voting-app
+```
+
+### Rollout stuck or pods in ImagePullBackOff
+```bash
+# Which revision is active, and did the last one fail?
+helm history voting-app -n voting-app
+kubectl -n voting-app get pods -o wide
+
+# Recover to the last healthy revision
+helm rollback voting-app -n voting-app --wait
+
+# If the image tag is wrong, fix the value and upgrade again
+helm upgrade voting-app helm/voting-app -n voting-app \
+  --reuse-values --set images.tag=local --wait
+```
+
+### `exceeded quota: limits.cpu` during an upgrade
+Surge pods are being rejected. The namespace quota must leave room for
+`maxSurge` on top of steady-state limits; see the 6000m ceiling in
+`terraform/modules/kubernetes-namespace/main.tf`. Check current usage with:
+
+```bash
+kubectl -n voting-app describe resourcequota voting-app-quota
 ```
 
 ### Port conflicts
@@ -254,6 +376,9 @@ lsof -i :5001
 ## Clean Up
 
 ```bash
+# Uninstall the application release first
+helm uninstall voting-app -n voting-app
+
 # Destroy Terraform resources
 cd terraform
 terraform destroy -auto-approve
@@ -265,11 +390,16 @@ kind delete cluster --name voting-app
 docker rmi voting-app-vote:local voting-app-worker:local voting-app-result:local
 ```
 
+> `./deploy-local.sh destroy` performs the uninstall and the Terraform destroy in
+> the correct order.
+
 ---
 
-## Next Steps (Phase 3+)
+## Next Steps
 
-1. **GitHub Actions CI/CD** - Build, test, scan, and deploy on push
-2. **ArgoCD/Flux** - GitOps deployment to Kind
-3. **Helm Charts** - Package as reusable Helm charts
-4. **EKS Migration** - Swap Kind provider for AWS EKS when cloud available
+Phase 5 (Helm orchestration and rollback safety) is complete. Remaining
+production-hardening ideas:
+
+1. **GitOps** - ArgoCD/Flux watching `helm/voting-app` instead of a local script
+2. **EKS migration** - swap the Kind module for AWS EKS with managed node groups
+3. **Progressive delivery** - canary or blue/green using the same probe gates

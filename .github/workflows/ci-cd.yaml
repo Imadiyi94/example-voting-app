@@ -213,12 +213,72 @@ jobs:
         run: terraform -chdir=terraform validate
 
 # -------------------------------------------------------------------------
+# Helm chart validation (Phase 5): lint + render every object type
+# -------------------------------------------------------------------------
+  helm:
+    name: "Helm Chart Validation"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v4.3.1
+
+      - name: Lint chart
+        run: helm lint helm/voting-app --strict
+
+      - name: Render chart
+        run: |
+          helm template voting-app helm/voting-app \
+            --namespace voting-app \
+            --set images.tag=ci > /tmp/rendered.yaml
+
+      - name: Assert every expected object is rendered
+        run: |
+          set -eu
+          check() { grep -qx "kind: $1" /tmp/rendered.yaml || { echo "missing $1"; exit 1; }; }
+          check Deployment           # vote, redis, worker, result
+          check StatefulSet          # db
+          check Service              # vote, redis, worker, db, result
+          check ConfigMap            # runtime config + init.sql
+          check PersistentVolumeClaim
+          check Ingress
+          check PodDisruptionBudget
+
+          echo "Deployments:          $(grep -c '^kind: Deployment' /tmp/rendered.yaml)"
+          echo "Services:             $(grep -c '^kind: Service' /tmp/rendered.yaml)"
+          echo "StatefulSets:         $(grep -c '^kind: StatefulSet' /tmp/rendered.yaml)"
+          echo "PodDisruptionBudgets: $(grep -c '^kind: PodDisruptionBudget' /tmp/rendered.yaml)"
+
+      - name: Assert no secret value is rendered from the chart
+        run: |
+          set -eu
+          if grep -qE '^\s+db_password:\s*[^ ]' /tmp/rendered.yaml; then
+            echo "A literal database password leaked into the rendered chart"; exit 1
+          fi
+          grep -q 'secretKeyRef' /tmp/rendered.yaml
+
+      - name: Assert rollout probes and resource controls exist
+        run: |
+          set -eu
+          for probe in startupProbe readinessProbe livenessProbe; do
+            grep -q "$probe" /tmp/rendered.yaml || { echo "missing $probe"; exit 1; }
+          done
+          test "$(grep -c 'requests:' /tmp/rendered.yaml)" -ge 5
+          test "$(grep -c 'limits:' /tmp/rendered.yaml)" -ge 5
+
+# -------------------------------------------------------------------------
 # Task C + D - Registry auth, production build, short-SHA + latest tags
 # -------------------------------------------------------------------------
   publish:
     name: "Task C+D - Build & Push (${{ matrix.service }})"
     runs-on: ubuntu-latest
-    needs: [test, security, infrastructure]
+    needs: [test, security, infrastructure, helm]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     timeout-minutes: 30
     permissions:

@@ -1,7 +1,14 @@
 # Capstone 1 - The Voting App
 # Root Terraform configuration
-# Provisions the local multi-node Kind cluster and ALL application resources
-# (namespace, secrets, workloads, services) exclusively through Terraform modules.
+#
+# Responsibility split (Phase 5):
+#   Terraform -> cluster lifecycle, namespace guardrails, Secret/RBAC, ingress
+#                controller and optional monitoring (infrastructure concerns)
+#   Helm      -> the five application workloads, Services, ConfigMaps, PVCs and
+#                Ingress rules (see helm/voting-app)
+#
+# Workloads are deliberately NOT managed here any more: they are a single
+# parameterised Helm release so rollbacks are drift-free.
 
 terraform {
   required_version = ">= 1.6.0"
@@ -81,28 +88,15 @@ module "secrets" {
 }
 
 # =========================================================================
-# MODULE: Voting App workloads (vote, redis, worker, db, result)
-# =========================================================================
-
-module "voting_app" {
-  source          = "./modules/voting-app"
-  namespace       = var.namespace
-  image_registry  = var.image_registry
-  image_tag       = var.image_tag
-  replica_counts  = var.replica_counts
-  resource_limits = var.resource_limits
-  depends_on      = [module.secrets]
-}
-
-# =========================================================================
-# MODULE: Ingress (optional)
+# MODULE: Ingress controller (optional)
+# Ingress *rules* for vote/result live in the Helm chart; this only installs
+# the cluster-level NGINX controller.
 # =========================================================================
 
 module "ingress" {
-  source     = "./modules/ingress"
-  enable     = var.enable_ingress
-  namespace  = var.namespace
-  depends_on = [module.voting_app]
+  source    = "./modules/ingress"
+  enable    = var.enable_ingress
+  namespace = var.namespace
 }
 
 # =========================================================================
@@ -113,7 +107,7 @@ module "monitoring" {
   source     = "./modules/monitoring"
   enable     = var.enable_monitoring
   namespace  = var.namespace
-  depends_on = [module.voting_app]
+  depends_on = [module.kind_cluster, module.kubernetes_namespace]
 }
 
 # =========================================================================

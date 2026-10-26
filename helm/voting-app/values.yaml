@@ -1,0 +1,529 @@
+# =============================================================================
+# Capstone 1 - The Voting App
+# Single control surface for the whole application stack.
+#
+# Everything the chart renders is driven from this file. No Kubernetes object
+# is hard-coded in the templates beyond structure, so an environment can be
+# fully re-parameterised with `--values` overrides or `--set` at upgrade time.
+#
+# Phase 5 requirements mapped to values:
+#   Unified control .......... this file
+#   Persistence .............. services.redis.persistence, database.persistence
+#   Runtime variables ........ config (ConfigMap) + secrets (existing Secret)
+#   Stability checks ......... <service>.probes.{startup,readiness,liveness}
+#   Resource controls ........ <service>.resources.{requests,limits}
+# =============================================================================
+
+# --- Image defaults -------------------------------------------------------
+# Every service inherits these unless it overrides them in its own image block.
+images:
+  # Registry prefix, e.g. ghcr.io/imadiyi94/example-voting-app (no trailing slash)
+  registry: ""
+  # Default tag for the application images built in this repository
+  tag: local
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# --- Naming ---------------------------------------------------------------
+# Resource names stay stable (vote, redis, worker, db, result) because service
+# DNS names are part of the application contract. Override only if you also
+# change config.redisHost / config.dbHost.
+nameOverride: ""
+
+# --- Identity -------------------------------------------------------------
+serviceAccount:
+  # The ServiceAccount and RBAC are infrastructure concerns owned by Terraform.
+  create: false
+  name: voting-app
+
+# --- Non-secret runtime configuration ------------------------------------
+# Rendered into a single ConfigMap and consumed through configMapKeyRef, so a
+# value change is a config change, not an image change.
+config:
+  redisHost: redis
+  redisPort: "6379"
+  dbHost: db
+  dbPort: "5432"
+  dbName: postgres
+  dbUser: postgres
+
+# --- Secret wiring --------------------------------------------------------
+# The database password is never stored in this file. Terraform creates the
+# Secret (from a git-ignored terraform.tfvars) and the chart only references it.
+secrets:
+  existingSecret: voting-app-secrets
+  passwordKey: db_password
+
+# --- Shared hardening -----------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+# Labels added to every object and pod template
+commonLabels: {}
+
+# =============================================================================
+# Stateless services: vote, redis, worker, result
+# Each entry renders one Deployment + one Service (both individually togglable).
+# =============================================================================
+services:
+
+  # -------------------------------------------------------------------------
+  # vote - Flask frontend, accepts votes and queues them in Redis
+  # -------------------------------------------------------------------------
+  vote:
+    enabled: true
+    image:
+      repository: voting-app-vote
+      # tag: "" -> falls back to images.tag
+      tag: ""
+      # digest: "sha256:..." -> renders repo:tag@sha256:...
+    replicaCount: 2
+    revisionHistoryLimit: 5
+    containerPort: 8080
+    portName: http
+    service:
+      enabled: true
+      type: ClusterIP
+      portName: http
+      port: 80
+      targetPort: 8080
+    podSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+    env:
+      - name: REDIS_HOST
+        configMapKey: redisHost
+      - name: REDIS_PORT
+        configMapKey: redisPort
+    # Rollout probes: startup gates the readiness/liveness engines until the
+    # app can serve /health, readiness holds traffic off a warming pod, and
+    # liveness restarts a wedged process.
+    probes:
+      startup:
+        httpGet:
+          path: /health
+          port: http
+        periodSeconds: 5
+        timeoutSeconds: 5
+        failureThreshold: 40
+      readiness:
+        httpGet:
+          path: /health
+          port: http
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+        successThreshold: 1
+      liveness:
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 10
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 5
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 0
+        maxSurge: 1
+    minReadySeconds: 5
+    metrics:
+      enabled: true
+      path: /health
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  # -------------------------------------------------------------------------
+  # redis - in-memory queue backing the vote -> worker pipeline
+  # -------------------------------------------------------------------------
+  redis:
+    enabled: true
+    image:
+      repository: redis
+      tag: 7-alpine
+      digest: "sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541"
+    replicaCount: 1
+    revisionHistoryLimit: 3
+    containerPort: 6379
+    portName: redis
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lru
+    service:
+      enabled: true
+      type: ClusterIP
+      portName: redis
+      port: 6379
+      targetPort: 6379
+    podSecurityContext:
+      runAsUser: 999
+      runAsGroup: 999
+      fsGroup: 999
+    env: []
+    probes:
+      startup:
+        exec:
+          command:
+            - redis-cli
+            - ping
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 30
+      readiness:
+        exec:
+          command:
+            - redis-cli
+            - ping
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+      liveness:
+        exec:
+          command:
+            - redis-cli
+            - ping
+        initialDelaySeconds: 15
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 5
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+    # Dedicated persistent volume for the append-only file
+    persistence:
+      enabled: true
+      storageClass: standard
+      accessMode: ReadWriteOnce
+      size: 1Gi
+      mountPath: /data
+    strategy:
+      type: Recreate          # RWO volume cannot be shared by two pods
+    minReadySeconds: 0
+    metrics:
+      enabled: false
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  # -------------------------------------------------------------------------
+  # worker - .NET consumer, moves votes from Redis into PostgreSQL
+  # -------------------------------------------------------------------------
+  worker:
+    enabled: true
+    image:
+      repository: voting-app-worker
+      tag: ""
+    replicaCount: 1
+    revisionHistoryLimit: 3
+    # No container port: the worker only dials out.
+    containerPort: null
+    portName: ""
+    service:
+      enabled: true
+      headless: true
+    podSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+    env:
+      - name: REDIS_HOST
+        configMapKey: redisHost
+      - name: REDIS_PORT
+        configMapKey: redisPort
+      - name: DB_HOST
+        configMapKey: dbHost
+      - name: DB_PORT
+        configMapKey: dbPort
+      - name: DB_NAME
+        configMapKey: dbName
+      - name: DB_USER
+        configMapKey: dbUser
+      - name: DB_PASSWORD
+        secretKey: db_password
+    probes:
+      startup:
+        exec:
+          command:
+            - sh
+            - -c
+            - nc -z "$DB_HOST" "$DB_PORT" && nc -z "$REDIS_HOST" "$REDIS_PORT"
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 60
+      readiness:
+        exec:
+          command:
+            - sh
+            - -c
+            - nc -z "$DB_HOST" "$DB_PORT" && nc -z "$REDIS_HOST" "$REDIS_PORT"
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 3
+      liveness:
+        exec:
+          command:
+            - sh
+            - -c
+            - nc -z "$DB_HOST" "$DB_PORT" && nc -z "$REDIS_HOST" "$REDIS_PORT"
+        initialDelaySeconds: 20
+        periodSeconds: 15
+        timeoutSeconds: 5
+        failureThreshold: 5
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 0
+        maxSurge: 1
+    minReadySeconds: 5
+    metrics:
+      enabled: false
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  # -------------------------------------------------------------------------
+  # result - Node.js results frontend, streams tallies over SSE
+  # -------------------------------------------------------------------------
+  result:
+    enabled: true
+    image:
+      repository: voting-app-result
+      tag: ""
+    replicaCount: 2
+    revisionHistoryLimit: 5
+    containerPort: 8080
+    portName: http
+    service:
+      enabled: true
+      type: ClusterIP
+      portName: http
+      port: 80
+      targetPort: 8080
+    podSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+    env:
+      - name: DB_HOST
+        configMapKey: dbHost
+      - name: DB_PORT
+        configMapKey: dbPort
+      - name: DB_NAME
+        configMapKey: dbName
+      - name: DB_USER
+        configMapKey: dbUser
+      - name: DB_PASSWORD
+        secretKey: db_password
+    probes:
+      startup:
+        httpGet:
+          path: /health
+          port: http
+        periodSeconds: 5
+        timeoutSeconds: 5
+        failureThreshold: 40
+      readiness:
+        httpGet:
+          path: /health
+          port: http
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 3
+      liveness:
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 10
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 5
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    strategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 0
+        maxSurge: 1
+    minReadySeconds: 5
+    metrics:
+      enabled: true
+      path: /health
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+# =============================================================================
+# Stateful database
+# =============================================================================
+database:
+  enabled: true
+  name: db                      # must match config.dbHost
+  image:
+    repository: postgres
+    tag: 16-alpine
+    digest: "sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36"
+  replicaCount: 1
+  revisionHistoryLimit: 3
+  containerPort: 5432
+  portName: postgres
+  # PGDATA lives in a subdirectory so the volume root can stay owned by root
+  pgData: /var/lib/postgresql/data/pgdata
+  service:
+    enabled: true
+    type: ClusterIP
+    portName: postgres
+    port: 5432
+    targetPort: 5432
+  podSecurityContext:
+    runAsUser: 70
+    runAsGroup: 70
+    fsGroup: 70
+  containerSecurityContext:
+    runAsUser: 70
+    runAsGroup: 70
+  env:
+    - name: PGDATA
+      value: /var/lib/postgresql/data/pgdata
+    - name: POSTGRES_DB
+      configMapKey: dbName
+    - name: POSTGRES_USER
+      configMapKey: dbUser
+    - name: POSTGRES_PASSWORD
+      secretKey: db_password
+  probes:
+    startup:
+      exec:
+        command:
+          - pg_isready
+          - -U
+          - postgres
+          - -d
+          - postgres
+      periodSeconds: 5
+      timeoutSeconds: 5
+      failureThreshold: 60
+    readiness:
+      exec:
+        command:
+          - pg_isready
+          - -U
+          - postgres
+          - -d
+          - postgres
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+    liveness:
+      exec:
+        command:
+          - pg_isready
+          - -U
+          - postgres
+          - -d
+          - postgres
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 5
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # Dedicated persistent volume for database durability on block storage
+  persistence:
+    enabled: true
+    storageClass: standard
+    accessMode: ReadWriteOnce
+    size: 5Gi
+    mountPath: /var/lib/postgresql/data
+  # SQL executed once on an empty data directory (mounted as a ConfigMap)
+  initScript:
+    enabled: true
+  metrics:
+    enabled: false
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# =============================================================================
+# Networking
+# =============================================================================
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  # Each host routes to one of the chart's own services
+  hosts:
+    - host: vote.local
+      service: vote
+      portName: http
+      path: /
+      pathType: Prefix
+    - host: result.local
+      service: result
+      portName: http
+      path: /
+      pathType: Prefix
+  tls: []
+
+# =============================================================================
+# Availability
+# =============================================================================
+podDisruptionBudget:
+  enabled: true
+  # Applied to stateless services that run more than one replica
+  minAvailable: 1
+  selectorLabel: app
+
+# =============================================================================
+# Rollout safety
+# =============================================================================
+# Set to a timestamp/UUID to force a rolling restart without an image change
+rolloutToken: ""

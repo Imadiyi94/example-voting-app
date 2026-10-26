@@ -227,12 +227,12 @@ Default resource constraints (adjust in `docker-compose.yml`):
 
 ---
 
-## Next Steps (Phase 2+)
+## Delivery Phases
 
-- **Phase 2**: Replace base images with pinned SHA256 digests, add Trivy scanning
-- **Phase 3**: Terraform → EKS cluster provisioning
-- **Phase 4**: GitHub Actions CI/CD pipeline
-- **Phase 5**: Helm charts for Kubernetes deployment
+- **Phase 2** (done): base images pinned by SHA256 digest, Trivy scanning, non-root containers
+- **Phase 3** (done): Terraform infrastructure (Kind cluster, namespace guardrails, RBAC, ingress controller)
+- **Phase 4** (done): GitHub Actions CI/CD pipeline and GHCR image publishing
+- **Phase 5** (done): parameterised Helm chart with rollout probes, persistent storage, and a proven rollback loop (`docs/PHASE5.md`)
 
 ---
 

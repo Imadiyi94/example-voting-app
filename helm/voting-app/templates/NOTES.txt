@@ -1,0 +1,36 @@
+Capstone 1 - The Voting App has been deployed.
+
+Release:  {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+Chart:    {{ .Chart.Name }}-{{ .Chart.Version }}
+Revision: {{ .Release.Revision }}
+
+Workloads
+---------
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.enabled }}
+  {{ $name }}: {{ $svc.replicaCount }} replica(s)
+{{- end }}
+{{- end }}
+{{- if .Values.database.enabled }}
+  {{ .Values.database.name }}: StatefulSet, {{ .Values.database.persistence.size }} persistent volume
+{{- end }}
+
+Check rollout state
+-------------------
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/vote   --timeout=180s
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/result --timeout=180s
+  kubectl -n {{ .Release.Namespace }} rollout status statefulset/{{ .Values.database.name }} --timeout=180s
+
+Access (ingress {{ if .Values.ingress.enabled }}enabled{{ else }}disabled{{ end }})
+----------------------------------
+{{- range .Values.ingress.hosts }}
+  http://{{ .host }}:30080{{ .path }}
+{{- end }}
+  curl -H "Host: vote.local"   http://localhost:30080/health
+  curl -H "Host: result.local" http://localhost:30080/api/votes
+
+Rollback
+--------
+  helm history {{ .Release.Name }} -n {{ .Release.Namespace }}
+  helm rollback {{ .Release.Name }} <revision> -n {{ .Release.Namespace }} --wait

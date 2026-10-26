@@ -1,0 +1,33 @@
+{{- if .Values.ingress.enabled }}
+{{- $root := . }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ printf "%s-ingress" $root.Release.Name }}
+  namespace: {{ $root.Release.Namespace }}
+  labels:
+    {{- include "voting-app.labels" $root | nindent 4 }}
+  {{- with $root.Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ $root.Values.ingress.className }}
+  {{- with $root.Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range $root.Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: {{ .path | default "/" }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ .service }}
+                port:
+                  name: {{ .portName }}
+    {{- end }}
+{{- end }}

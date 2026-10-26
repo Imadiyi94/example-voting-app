@@ -56,80 +56,10 @@ resource "kubernetes_namespace" "ingress" {
 }
 
 # =========================================================================
-# Ingress Resources for Vote and Result Services (networking.k8s.io/v1)
+# Ingress rules for vote and result are rendered by the Helm chart
+# (helm/voting-app, values.ingress). Terraform only owns the cluster-level
+# controller below, so application routing rolls back with the app release.
 # =========================================================================
-
-resource "kubernetes_ingress_v1" "vote" {
-  count = var.enable ? 1 : 0
-
-  metadata {
-    name      = "vote-ingress"
-    namespace = var.namespace
-    annotations = {
-      "nginx.ingress.kubernetes.io/ssl-redirect" = "false"
-    }
-  }
-
-  spec {
-    ingress_class_name = "nginx"
-
-    rule {
-      host = "vote.local"
-      http {
-        path {
-          path      = "/"
-          path_type = "Prefix"
-          backend {
-            service {
-              name = "vote"
-              port {
-                number = 80
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  depends_on = [helm_release.nginx_ingress]
-}
-
-resource "kubernetes_ingress_v1" "result" {
-  count = var.enable ? 1 : 0
-
-  metadata {
-    name      = "result-ingress"
-    namespace = var.namespace
-    annotations = {
-      "nginx.ingress.kubernetes.io/ssl-redirect" = "false"
-    }
-  }
-
-  spec {
-    ingress_class_name = "nginx"
-
-    rule {
-      host = "result.local"
-      http {
-        path {
-          path      = "/"
-          path_type = "Prefix"
-          backend {
-            service {
-              name = "result"
-              port {
-                number = 80
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  depends_on = [helm_release.nginx_ingress]
-}
 
 # =========================================================================
 # Outputs

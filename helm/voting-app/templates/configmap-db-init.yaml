@@ -1,0 +1,19 @@
+{{- if .Values.database.enabled }}
+{{- if .Values.database.initScript.enabled }}
+{{- /*
+Bootstrap SQL for an empty database. The file is shipped inside the chart so
+the chart is self-contained; it mirrors db/init.sql in the repository.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "voting-app.dbInitConfigMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "voting-app.labels" . | nindent 4 }}
+    app: {{ .Values.database.name }}
+data:
+  init.sql: |-
+    {{- .Files.Get "files/init.sql" | nindent 4 }}
+{{- end }}
+{{- end }}
