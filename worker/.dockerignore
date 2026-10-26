@@ -1,0 +1,9 @@
+# Worker build context excludes
+# Keeps local builds identical to CI (no stale bin/obj overriding restore output)
+bin/
+obj/
+*.user
+*.suo
+.vs/
+**/bin/
+**/obj/

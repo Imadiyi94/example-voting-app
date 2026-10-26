@@ -15,7 +15,12 @@ RUN dotnet restore Worker.csproj -r linux-x64
 
 # Copy source and build
 COPY . .
-RUN dotnet publish Worker.csproj -c Release -o /app/publish --no-restore -r linux-x64
+# Publish performs its own restore pass on purpose: relying on "--no-restore"
+# against a restore performed before "COPY . ." fails on clean CI runners with
+# NETSDK1064 (transitive packages such as Microsoft.Extensions.Configuration.Binder
+# missing from the global packages folder). Re-restoring here is cheap because the
+# previous layer already warmed the cache, and it keeps builds reproducible.
+RUN dotnet publish Worker.csproj -c Release -o /app/publish -r linux-x64
 
 # =========================================================================
 # Stage 2: Runtime
